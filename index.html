@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apontamento de Produção</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+    </style>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, getDocs, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Exposing Firebase services globally for use in the main script
+        window.firebase = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, onSnapshot, query, getDocs, Timestamp, setLogLevel };
+    </script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-2xl border border-gray-200">
+        <h1 class="text-3xl font-bold text-center mb-6 text-gray-800">Apontamento de Produção</h1>
+        
+        <div class="text-center text-sm mb-4 text-gray-500">
+            <p>ID do Usuário: <span id="userIdDisplay" class="font-mono text-xs">Carregando...</span></p>
+        </div>
+
+        <!-- Formulário de Apontamento -->
+        <div class="space-y-4">
+            <div>
+                <label for="responsavel" class="block text-sm font-medium text-gray-700">Nome do Responsável</label>
+                <input type="text" id="responsavel" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Digite o nome aqui...">
+            </div>
+
+            <div>
+                <label for="codigoProduto" class="block text-sm font-medium text-gray-700">Código do Produto</label>
+                <select id="codigoProduto" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2">
+                    <option value="" selected disabled>Selecione um código...</option>
+                    <option value="CAC0001-C">CAC0001-C</option>
+                    <option value="CBC0010-C">CBC0010-C</option>
+                    <option value="CAL0002-C">CAL0002-C</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="quantidade" class="block text-sm font-medium text-gray-700">Quantidade Produzida</label>
+                <input type="number" id="quantidade" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Ex: 100">
+            </div>
+        </div>
+
+        <!-- Botões de Controle da Ordem -->
+        <div class="mt-6 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
+            <button id="iniciarBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors shadow-lg">Iniciar Ordem</button>
+            <button id="pausarBtn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors shadow-lg" disabled>Pausar</button>
+            <button id="finalizarBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors shadow-lg" disabled>Finalizar Ordem</button>
+            <button id="exportarBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors shadow-lg">Download CSV</button>
+        </div>
+
+        <!-- Display de Informações -->
+        <div id="display" class="mt-8 bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">Resumo da Ordem</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <span class="font-medium text-gray-700">Início:</span>
+                    <span id="horaInicio" class="font-light text-gray-600">--</span>
+                </div>
+                <div>
+                    <span class="font-medium text-gray-700">Fim:</span>
+                    <span id="horaFim" class="font-light text-gray-600">--</span>
+                </div>
+            </div>
+            <div class="mt-4">
+                <span class="font-medium text-gray-700">Tempo Líquido de Produção:</span>
+                <span id="tempoLiquido" class="font-bold text-green-600 text-lg">--</span>
+            </div>
+            <div class="mt-2">
+                <span class="font-medium text-gray-700">Produtividade:</span>
+                <span id="produtividade" class="font-bold text-green-600 text-lg">--</span>
+            </div>
+        </div>
+
+        <!-- Registro de Pausas -->
+        <div id="pausasContainer" class="mt-8 bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h3 class="text-xl font-semibold mb-4 text-gray-800">Registro de Pausas</h3>
+            <ul id="listaPausas" class="list-disc pl-5 space-y-2 text-gray-600"></ul>
+        </div>
+        
+        <!-- Histórico de Apontamentos -->
+        <div id="historicoContainer" class="mt-8 bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h3 class="text-xl font-semibold mb-4 text-gray-800">Histórico de Apontamentos</h3>
+            <ul id="historicoLista" class="list-none space-y-4">
+                <li class="text-gray-500">Carregando histórico...</li>
+            </ul>
+        </div>
+
+        <!-- Modal para Justificativa de Pausa (simulando um prompt) -->
+        <div id="justificativaModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center">
+            <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md border border-gray-200">
+                <h3 class="text-lg font-bold mb-4">Justificativa da Pausa</h3>
+                <textarea id="justificativaInput" rows="4" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2" placeholder="Motivo da pausa (ex: café, manutenção, etc.)"></textarea>
+                <div class="mt-4 flex justify-end space-x-2">
+                    <button id="salvarJustificativaBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">Salvar</button>
+                    <button id="cancelarJustificativaBtn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-lg">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal de Aviso -->
+        <div id="avisoModal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center">
+            <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm border border-gray-200 text-center">
+                <p id="avisoText" class="text-lg mb-4 text-gray-700">--</p>
+                <button id="fecharAvisoBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Importa os módulos do Firebase expostos no objeto 'window'
+        const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, collection, addDoc, onSnapshot, query, getDocs, Timestamp, setLogLevel } = window.firebase;
+        
+        // Obtém referências para os elementos do DOM
+        const responsavelInput = document.getElementById('responsavel');
+        const codigoProdutoSelect = document.getElementById('codigoProduto');
+        const quantidadeInput = document.getElementById('quantidade');
+        
+        const iniciarBtn = document.getElementById('iniciarBtn');
+        const pausarBtn = document.getElementById('pausarBtn');
+        const finalizarBtn = document.getElementById('finalizarBtn');
+        const exportarBtn = document.getElementById('exportarBtn');
+
+        const horaInicioSpan = document.getElementById('horaInicio');
+        const horaFimSpan = document.getElementById('horaFim');
+        const tempoLiquidoSpan = document.getElementById('tempoLiquido');
+        const produtividadeSpan = document.getElementById('produtividade');
+        const listaPausasUl = document.getElementById('listaPausas');
+        const historicoListaUl = document.getElementById('historicoLista');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+
+        const justificativaModal = document.getElementById('justificativaModal');
+        const justificativaInput = document.getElementById('justificativaInput');
+        const salvarJustificativaBtn = document.getElementById('salvarJustificativaBtn');
+        const cancelarJustificativaBtn = document.getElementById('cancelarJustificativaBtn');
+        
+        const avisoModal = document.getElementById('avisoModal');
+        const avisoText = document.getElementById('avisoText');
+        const fecharAvisoBtn = document.getElementById('fecharAvisoBtn');
+
+        // Variáveis de estado da aplicação
+        let inicioProducao = null;
+        let inicioPausa = null;
+        let tempoTotalPausas = 0;
+        let emPausa = false;
+        let pausasRegistradas = [];
+        let db, auth, userId;
+        
+        // Variáveis globais fornecidas pelo ambiente
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = {
+          apiKey: "AIzaSyBDb1E_wHtmISvNG31RhlmP979890X7nxY",
+          authDomain: "apontamentoproducao-f141e.firebaseapp.com",
+          projectId: "apontamentoproducao-f141e",
+          storageBucket: "apontamentoproducao-f141e.firebasestorage.app",
+          messagingSenderId: "516590802933",
+          appId: "1:516590802933:web:756d1e76d981e51604b2bc",
+          measurementId: "G-3ZF5SLW87S"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Função para exibir um aviso no modal customizado
+        function showAviso(message) {
+            avisoText.textContent = message;
+            avisoModal.classList.remove('hidden');
+        }
+
+        // Função utilitária para formatar o tempo em HH:MM:SS
+        function formatarTempo(ms) {
+            const segundos = Math.floor(ms / 1000);
+            const minutos = Math.floor(segundos / 60);
+            const horas = Math.floor(minutos / 60);
+
+            const s = segundos % 60;
+            const m = minutos % 60;
+            const h = horas % 24;
+
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+        
+        // Inicialização e Autenticação do Firebase
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        userIdDisplay.textContent = userId;
+                        setupRealtimeListener();
+                    } else {
+                        userIdDisplay.textContent = 'Não autenticado';
+                    }
+                });
+
+            } catch (error) {
+                console.error("Erro ao inicializar Firebase ou autenticar:", error);
+                showAviso("Erro ao conectar com o banco de dados. Por favor, tente novamente.");
+            }
+        }
+        
+        // Listener para o histórico de apontamentos
+        function setupRealtimeListener() {
+            if (!userId) return;
+            // Altera o caminho para um local público
+            const producoesRef = collection(db, `artifacts/${appId}/public/data/producoes`);
+            const q = query(producoesRef);
+            
+            onSnapshot(q, (snapshot) => {
+                historicoListaUl.innerHTML = '';
+                if (snapshot.empty) {
+                    historicoListaUl.innerHTML = '<li class="text-gray-500">Nenhum apontamento registrado ainda.</li>';
+                }
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const li = document.createElement('li');
+                    li.classList.add('p-4', 'bg-gray-100', 'rounded-lg', 'border', 'border-gray-200');
+                    li.innerHTML = `
+                        <p class="font-semibold text-gray-800">${data.responsavel} - ${data.codigoProduto}</p>
+                        <p class="text-sm text-gray-600"><strong>Quantidade:</strong> ${data.quantidade}</p>
+                        <p class="text-sm text-gray-600"><strong>Tempo Líquido:</strong> ${data.tempoLiquidoFormatado}</p>
+                        <p class="text-sm text-gray-600"><strong>Produtividade:</strong> ${data.produtividade.toFixed(2)} pçs/hora</p>
+                        <p class="text-xs italic text-gray-400">Finalizado em: ${data.dataFinalizacao.toDate().toLocaleString('pt-BR')}</p>
+                    `;
+                    historicoListaUl.appendChild(li);
+                });
+            });
+        }
+        
+        // Event listener para o botão de fechar o aviso
+        fecharAvisoBtn.addEventListener('click', () => {
+            avisoModal.classList.add('hidden');
+        });
+
+        // Event listener para o botão Iniciar Ordem
+        iniciarBtn.addEventListener('click', () => {
+            if (!responsavelInput.value || !codigoProdutoSelect.value || !quantidadeInput.value) {
+                showAviso("Por favor, preencha todos os campos antes de iniciar a ordem.");
+                return;
+            }
+
+            inicioProducao = new Date().getTime();
+            horaInicioSpan.textContent = new Date().toLocaleString('pt-BR');
+            pausasRegistradas = [];
+            tempoTotalPausas = 0;
+
+            iniciarBtn.disabled = true;
+            pausarBtn.disabled = false;
+            finalizarBtn.disabled = false;
+        });
+
+        // Event listener para o botão Pausar/Continuar
+        pausarBtn.addEventListener('click', () => {
+            if (!emPausa) {
+                justificativaModal.classList.remove('hidden');
+            } else {
+                const fimPausa = new Date().getTime();
+                const duracaoPausa = fimPausa - inicioPausa;
+                tempoTotalPausas += duracaoPausa;
+                
+                // Adiciona o tempo final da última pausa registrada
+                if(pausasRegistradas.length > 0) {
+                    pausasRegistradas[pausasRegistradas.length - 1].fimPausa = fimPausa;
+                }
+
+                emPausa = false;
+                pausarBtn.textContent = 'Pausar';
+                pausarBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+                pausarBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+                
+                const lastPauseItem = listaPausasUl.lastElementChild;
+                if (lastPauseItem) {
+                    lastPauseItem.innerHTML += `<br><span class="text-sm italic text-gray-500">Retorno: ${new Date(fimPausa).toLocaleString('pt-BR')}</span>`;
+                }
+            }
+        });
+
+        // Event listener para o botão Salvar Justificativa (do modal)
+        salvarJustificativaBtn.addEventListener('click', () => {
+            const justificativa = justificativaInput.value;
+            if (justificativa.trim() === '') {
+                showAviso("A justificativa não pode estar vazia.");
+                return;
+            }
+
+            inicioPausa = new Date().getTime();
+            emPausa = true;
+            pausarBtn.textContent = 'Continuar';
+            pausarBtn.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+            pausarBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+
+            // Adiciona a pausa à lista local e visual
+            pausasRegistradas.push({ inicioPausa: inicioPausa, justificativa });
+            const li = document.createElement('li');
+            li.innerHTML = `Pausa: ${justificativa} - <span class="text-sm italic text-gray-500">Início: ${new Date(inicioPausa).toLocaleString('pt-BR')}</span>`;
+            listaPausasUl.appendChild(li);
+
+            justificativaInput.value = '';
+            justificativaModal.classList.add('hidden');
+        });
+
+        // Event listener para o botão Cancelar Justificativa (do modal)
+        cancelarJustificativaBtn.addEventListener('click', () => {
+            justificativaInput.value = '';
+            justificativaModal.classList.add('hidden');
+        });
+
+        // Event listener para o botão Finalizar Ordem
+        finalizarBtn.addEventListener('click', async () => {
+            if (!inicioProducao) {
+                showAviso("A ordem ainda não foi iniciada.");
+                return;
+            }
+            if (!userId) {
+                showAviso("Aguarde a autenticação do usuário antes de finalizar.");
+                return;
+            }
+
+            if (emPausa) {
+                const fimPausa = new Date().getTime();
+                const duracaoPausa = fimPausa - inicioPausa;
+                tempoTotalPausas += duracaoPausa;
+                emPausa = false;
+                if(pausasRegistradas.length > 0) {
+                    pausasRegistradas[pausasRegistradas.length - 1].fimPausa = fimPausa;
+                }
+            }
+
+            const fimProducao = new Date().getTime();
+            horaFimSpan.textContent = new Date(fimProducao).toLocaleString('pt-BR');
+
+            const tempoBruto = fimProducao - inicioProducao;
+            const tempoLiquido = tempoBruto - tempoTotalPausas;
+            const tempoLiquidoFormatado = formatarTempo(tempoLiquido);
+            tempoLiquidoSpan.textContent = tempoLiquidoFormatado;
+
+            const quantidade = parseFloat(quantidadeInput.value);
+            const tempoLiquidoEmHoras = tempoLiquido / (1000 * 60 * 60);
+            const produtividade = tempoLiquidoEmHoras > 0 ? quantidade / tempoLiquidoEmHoras : 0;
+            produtividadeSpan.textContent = `${produtividade.toFixed(2)} peças/hora`;
+
+            const producaoData = {
+                responsavel: responsavelInput.value,
+                codigoProduto: codigoProdutoSelect.value,
+                quantidade: quantidade,
+                dataInicio: Timestamp.fromMillis(inicioProducao),
+                dataFim: Timestamp.fromMillis(fimProducao),
+                tempoLiquidoMs: tempoLiquido,
+                tempoLiquidoFormatado: tempoLiquidoFormatado,
+                produtividade: produtividade,
+                pausas: pausasRegistradas.map(p => ({
+                    justificativa: p.justificativa,
+                    inicioPausa: Timestamp.fromMillis(p.inicioPausa),
+                    fimPausa: p.fimPausa ? Timestamp.fromMillis(p.fimPausa) : null,
+                })),
+                dataFinalizacao: Timestamp.now()
+            };
+
+            try {
+                // Altera o caminho para um local público
+                const docRef = await addDoc(collection(db, `artifacts/${appId}/public/data/producoes`), producaoData);
+                console.log("Documento escrito com ID: ", docRef.id);
+            } catch (e) {
+                console.error("Erro ao adicionar documento: ", e);
+                showAviso("Erro ao salvar os dados. Verifique a conexão.");
+            }
+
+            iniciarBtn.disabled = false;
+            pausarBtn.disabled = true;
+            finalizarBtn.disabled = true;
+            pausarBtn.textContent = 'Pausar';
+            pausarBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+            pausarBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+            
+            inicioProducao = null;
+            inicioPausa = null;
+            tempoTotalPausas = 0;
+            emPausa = false;
+            pausasRegistradas = [];
+
+            responsavelInput.value = '';
+            codigoProdutoSelect.value = '';
+            quantidadeInput.value = '';
+            listaPausasUl.innerHTML = '';
+        });
+        
+        // Event listener para o botão de exportar
+        exportarBtn.addEventListener('click', async () => {
+            if (!userId) {
+                showAviso("Aguarde a autenticação do usuário para exportar os dados.");
+                return;
+            }
+            
+            try {
+                // Altera o caminho para um local público
+                const producoesRef = collection(db, `artifacts/${appId}/public/data/producoes`);
+                const snapshot = await getDocs(producoesRef);
+                
+                if (snapshot.empty) {
+                    showAviso("Não há dados para exportar.");
+                    return;
+                }
+                
+                let csv = 'Responsavel,Codigo do Produto,Quantidade,Data de Inicio,Hora de Inicio,Data de Fim,Hora de Fim,Tempo Liquido,Produtividade,Pausas (Motivo),Pausas (Duracao)\n';
+                
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    
+                    const dataInicio = data.dataInicio.toDate();
+                    const dataInicioStr = dataInicio.toLocaleDateString('pt-BR');
+                    const horaInicioStr = dataInicio.toLocaleTimeString('pt-BR');
+                    
+                    const dataFim = data.dataFim.toDate();
+                    const dataFimStr = dataFim.toLocaleDateString('pt-BR');
+                    const horaFimStr = dataFim.toLocaleTimeString('pt-BR');
+
+                    const motivosPausas = data.pausas.map(p => p.justificativa).join('; ');
+                    const duracoesPausas = data.pausas.map(p => {
+                        const inicio = p.inicioPausa.toDate();
+                        const fim = p.fimPausa ? p.fimPausa.toDate() : data.dataFim.toDate();
+                        return formatarTempo(fim - inicio);
+                    }).join('; ');
+                    
+                    csv += `"${data.responsavel}","${data.codigoProduto}",${data.quantidade},"${dataInicioStr}","${horaInicioStr}","${dataFimStr}","${horaFimStr}","${data.tempoLiquidoFormatado}",${data.produtividade.toFixed(2)},"${motivosPausas}","${duracoesPausas}"\n`;
+                });
+                
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.setAttribute('href', url);
+                a.setAttribute('download', 'historico_apontamentos.csv');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showAviso("Histórico exportado com sucesso!");
+                
+            } catch (error) {
+                console.error("Erro ao exportar dados:", error);
+                showAviso("Erro ao exportar dados. Tente novamente.");
+            }
+        });
+        
+        // Inicia a aplicação
+        initializeFirebase();
+    </script>
+</body>
+</html>
