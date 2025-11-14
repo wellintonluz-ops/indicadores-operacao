@@ -552,7 +552,29 @@
                                 <input type="text" id="tempo-downtime" placeholder="Ex: 30:00 para 30 horas" pattern="[0-9]+:[0-5][0-9]" class="mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
                                 <p class="text-xs text-gray-400 mt-1">Formato: HH:MM (pode ultrapassar 24h, ex: 30:15 para 30h e 15min)</p>
                             </div>
-                            <button type="submit" class="btn-primary py-2 px-4 rounded-lg w-full">Salvar Regra</button> <!-- Removed font-bold -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Setores Afetados</label>
+                                <div class="bg-gray-700 p-3 rounded-md space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" id="setor-picking" class="setor-downtime-checkbox mr-2 h-4 w-4 rounded border-gray-600 bg-gray-600 text-blue-600 focus:ring-blue-500" value="PICKING">
+                                        <label for="setor-picking" class="text-sm text-gray-300">Picking</label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input type="checkbox" id="setor-expedicao" class="setor-downtime-checkbox mr-2 h-4 w-4 rounded border-gray-600 bg-gray-600 text-blue-600 focus:ring-blue-500" value="EXPEDIÇÃO">
+                                        <label for="setor-expedicao" class="text-sm text-gray-300">Expedição</label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input type="checkbox" id="setor-opemp" class="setor-downtime-checkbox mr-2 h-4 w-4 rounded border-gray-600 bg-gray-600 text-blue-600 focus:ring-blue-500" value="OP_EMP">
+                                        <label for="setor-opemp" class="text-sm text-gray-300">Operador de Empilhadeira</label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input type="checkbox" id="setor-geral" class="setor-downtime-checkbox mr-2 h-4 w-4 rounded border-gray-600 bg-gray-600 text-blue-600 focus:ring-blue-500" value="GERAL">
+                                        <label for="setor-geral" class="text-sm text-gray-300">Todos os Setores</label>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1">Selecione um ou mais setores que serão afetados por este downtime</p>
+                            </div>
+                            <button type="submit" class="btn-primary py-2 px-4 rounded-lg w-full">Salvar Regra</button>
                         </form>
                         <div id="downtime-feedback" class="mt-4 text-center"></div>
                     </div>
@@ -2124,9 +2146,9 @@
                     console.log('Processando regra:', rule);
                     const motivo = rule.motivo;
                     const tempoMin = timeStringToMinutes(rule.tempo);
-                    const motivoUpper = motivo.toUpperCase();
+                    const setores = rule.setores || []; // Array de setores afetados
                     
-                    console.log(`- Motivo: ${motivo}, Tempo: ${rule.tempo}, Minutos: ${tempoMin}`);
+                    console.log(`- Motivo: ${motivo}, Tempo: ${rule.tempo}, Minutos: ${tempoMin}, Setores: ${setores.join(', ')}`);
 
                     // Req 2: Acumular total por motivo
                     if (!downtimePorMotivoMin[motivo]) {
@@ -2135,20 +2157,33 @@
                     downtimePorMotivoMin[motivo] += tempoMin;
 
                     // Req 1: Acumular total por setor
-                    // (Esta lógica assume que o nome do motivo indica o setor)
-                    if (motivoUpper.includes('PICKING')) {
-                        downtimeTotalMinPorSetor.PICKING += tempoMin;
-                        console.log(`  -> Adicionado ${tempoMin} min ao PICKING`);
-                    } else if (motivoUpper.includes('EXPEDIÇÃO') || motivoUpper.includes('EXPEDICAO')) {
-                        downtimeTotalMinPorSetor.EXPEDIÇÃO += tempoMin;
-                        console.log(`  -> Adicionado ${tempoMin} min à EXPEDIÇÃO`);
-                    } else if (motivoUpper.includes('EMPILHADEIRA') || motivoUpper.includes('OP EMP')) {
-                        downtimeTotalMinPorSetor.OP_EMP += tempoMin;
-                        console.log(`  -> Adicionado ${tempoMin} min ao OP_EMP`);
+                    // *** NOVA LÓGICA: Usar setores salvos ao invés de inferir pelo nome ***
+                    if (setores.length === 0) {
+                        // Fallback para regras antigas sem setores definidos
+                        const motivoUpper = motivo.toUpperCase();
+                        if (motivoUpper.includes('PICKING')) {
+                            downtimeTotalMinPorSetor.PICKING += tempoMin;
+                            console.log(`  -> (Fallback) Adicionado ${tempoMin} min ao PICKING`);
+                        } else if (motivoUpper.includes('EXPEDIÇÃO') || motivoUpper.includes('EXPEDICAO')) {
+                            downtimeTotalMinPorSetor.EXPEDIÇÃO += tempoMin;
+                            console.log(`  -> (Fallback) Adicionado ${tempoMin} min à EXPEDIÇÃO`);
+                        } else if (motivoUpper.includes('EMPILHADEIRA') || motivoUpper.includes('OP EMP')) {
+                            downtimeTotalMinPorSetor.OP_EMP += tempoMin;
+                            console.log(`  -> (Fallback) Adicionado ${tempoMin} min ao OP_EMP`);
+                        } else {
+                            downtimeTotalMinPorSetor.GERAL += tempoMin;
+                            console.log(`  -> (Fallback) Adicionado ${tempoMin} min ao GERAL`);
+                        }
                     } else {
-                        // Se não for específico, é GERAL (ex: Café, Banheiro)
-                        downtimeTotalMinPorSetor.GERAL += tempoMin;
-                        console.log(`  -> Adicionado ${tempoMin} min ao GERAL`);
+                        // Usar setores explicitamente definidos
+                        setores.forEach(setor => {
+                            if (downtimeTotalMinPorSetor[setor] !== undefined) {
+                                downtimeTotalMinPorSetor[setor] += tempoMin;
+                                console.log(`  -> Adicionado ${tempoMin} min ao ${setor}`);
+                            } else {
+                                console.warn(`  -> Setor desconhecido: ${setor}`);
+                            }
+                        });
                     }
                 });
                 
@@ -5812,20 +5847,30 @@
 
                 const motivo = regrasElements.motivoInput.value.trim();
                 const tempo = regrasElements.tempoInput.value; // Should be in HH:MM format
+                
+                // Coletar setores selecionados
+                const checkboxes = document.querySelectorAll('.setor-downtime-checkbox:checked');
+                const setores = Array.from(checkboxes).map(cb => cb.value);
 
                 // Validação melhorada para aceitar valores acima de 24 horas
                 if (!motivo || !tempo || !/^\d+:[0-5]\d$/.test(tempo)) { // Permite qualquer quantidade de horas
                     regrasElements.downtimeFeedback.innerHTML = `<p class="text-orange-400 text-sm">Preencha o motivo e o tempo no formato HH:MM (ex: 30:15 para 30h e 15min).</p>`;
                     return;
                 }
+                
+                // Validar se pelo menos um setor foi selecionado
+                if (setores.length === 0) {
+                    regrasElements.downtimeFeedback.innerHTML = `<p class="text-orange-400 text-sm">Selecione pelo menos um setor afetado pelo downtime.</p>`;
+                    return;
+                }
 
                 try {
-                    await addDoc(collection(db, collectionPath), { motivo, tempo });
-                    regrasElements.downtimeFeedback.innerHTML = `<p class="text-green-400 text-sm">Regra salva com sucesso!</p>`;
+                    await addDoc(collection(db, collectionPath), { motivo, tempo, setores });
+                    regrasElements.downtimeFeedback.innerHTML = `<p class="text-green-400 text-sm">✅ Regra salva com sucesso!</p>`;
                     regrasElements.downtimeForm.reset();
                 } catch (error) {
                     console.error("Error saving downtime rule:", error);
-                    regrasElements.downtimeFeedback.innerHTML = `<p class="text-red-400 text-sm">Erro ao salvar a regra.</p>`;
+                    regrasElements.downtimeFeedback.innerHTML = `<p class="text-red-400 text-sm">❌ Erro ao salvar a regra.</p>`;
                 }
                 setTimeout(() => {
                      if (regrasElements.downtimeFeedback) regrasElements.downtimeFeedback.innerHTML = '';
@@ -5866,23 +5911,48 @@
                     return;
                 }
 
+                // Função auxiliar para formatar setores
+                const formatSetores = (setores) => {
+                    if (!setores || setores.length === 0) {
+                        return '<span class="text-gray-500 text-xs italic">Não especificado</span>';
+                    }
+                    
+                    const nomeSetores = {
+                        'PICKING': 'Picking',
+                        'EXPEDIÇÃO': 'Expedição',
+                        'OP_EMP': 'Op. Emp.',
+                        'GERAL': 'Todos'
+                    };
+                    
+                    return setores.map(s => {
+                        const nome = nomeSetores[s] || s;
+                        const cor = s === 'GERAL' ? 'bg-blue-600' : 
+                                   s === 'PICKING' ? 'bg-teal-600' : 
+                                   s === 'EXPEDIÇÃO' ? 'bg-orange-600' : 
+                                   'bg-rose-600';
+                        return `<span class="inline-block ${cor} text-white text-xs px-2 py-0.5 rounded mr-1">${nome}</span>`;
+                    }).join('');
+                };
+
                 container.innerHTML = `
                      <div class="overflow-x-auto relative shadow-md sm:rounded-lg">
                          <table class="w-full text-sm text-left text-gray-400">
                              <thead class="text-xs text-gray-300 uppercase bg-gray-700">
                                 <tr>
                                     <th scope="col" class="px-6 py-3">Motivo</th>
-                                    <th scope="col" class="px-6 py-3">Tempo Mensal (HH:MM)</th>
+                                    <th scope="col" class="px-6 py-3">Tempo Mensal</th>
+                                    <th scope="col" class="px-6 py-3">Setores Afetados</th>
                                     <th scope="col" class="px-6 py-3">Ação</th>
                                 </tr>
                              </thead>
                              <tbody>
                                 ${regras.map(regra => `
                                     <tr class="bg-gray-800 border-b border-gray-700">
-                                        <td class="px-6 py-4">${regra.motivo || 'N/A'}</td>
+                                        <td class="px-6 py-4 font-medium text-white">${regra.motivo || 'N/A'}</td>
                                         <td class="px-6 py-4">${regra.tempo || '--:--'}</td>
+                                        <td class="px-6 py-4">${formatSetores(regra.setores)}</td>
                                         <td class="px-6 py-4">
-                                            <button data-id="${regra.id}" class="delete-downtime-rule-btn text-red-500 hover:text-red-700 text-xs">Remover</button>
+                                            <button data-id="${regra.id}" class="delete-downtime-rule-btn text-red-500 hover:text-red-700 text-xs font-medium">🗑️ Remover</button>
                                         </td>
                                     </tr>
                                 `).join('')}
@@ -6539,6 +6609,28 @@
              if(regrasElements.metaListContainer) regrasElements.metaListContainer.addEventListener('click', deleteRule);
              // Dashboard removido - event listener removido
              if(operacaoElements.turnoFilter) operacaoElements.turnoFilter.addEventListener('change', calcularIndicadoresOperacao); // ADICIONADO
+             
+             // Downtime setores: comportamento de "Todos os Setores"
+             const setorGeralCheckbox = document.getElementById('setor-geral');
+             if(setorGeralCheckbox) {
+                setorGeralCheckbox.addEventListener('change', (e) => {
+                    const outrosCheckboxes = document.querySelectorAll('.setor-downtime-checkbox:not(#setor-geral)');
+                    if (e.target.checked) {
+                        // Se "Todos os Setores" for marcado, desmarcar os outros
+                        outrosCheckboxes.forEach(cb => cb.checked = false);
+                    }
+                });
+                
+                // Se qualquer outro setor for marcado, desmarcar "Todos os Setores"
+                const outrosSetoresCheckboxes = document.querySelectorAll('.setor-downtime-checkbox:not(#setor-geral)');
+                outrosSetoresCheckboxes.forEach(cb => {
+                    cb.addEventListener('change', (e) => {
+                        if (e.target.checked) {
+                            setorGeralCheckbox.checked = false;
+                        }
+                    });
+                });
+             }
              
              // Operator filter event listeners
              if(regrasElements.saveOperatorFilterBtn) regrasElements.saveOperatorFilterBtn.addEventListener('click', saveOperatorFilter);
